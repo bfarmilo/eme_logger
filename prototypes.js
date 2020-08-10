@@ -37,7 +37,7 @@ emeLogger.LogItemData;
  * @param {Object} result The object returned from this call, if any.
  * @constructor
  */
-emeLogger.EmeMethodCall = function(title, target, result) {
+emeLogger.EmeMethodCall = function (title, target, result) {
   this.timestamp = emeLogger.timeToString_(new Date().getTime());
   this.title = title;
   this.target = target;
@@ -52,10 +52,12 @@ emeLogger.EmeMethodCall = function(title, target, result) {
  * @param {Object} target The element this event was fired on.
  * @constructor
  */
-emeLogger.EmeEvent = function(title, e, target) {
+emeLogger.EmeEvent = function (title, e, target) {
+  // Note, the timestamp may be a DOMHighResTimeStamp (https://developer.mozilla.org/en-US/docs/Web/API/DOMHighResTimeStamp)
+  // in which case you need to add the timeOrigin to get a proper timestamp
   this.title = title;
   this.event = e;
-  this.timestamp = emeLogger.timeToString_(e.timeStamp);
+  this.timestamp = emeLogger.timeToString_((new Date(e.timeStamp)).getFullYear() !== (new Date()).getFullYear() && window.performance.now() ? window.performance.timeOrigin + e.timeStamp : e.timeStamp);
   this.target = target;
 };
 
@@ -66,14 +68,31 @@ emeLogger.EmeEvent = function(title, e, target) {
  * @return {string} A human readable string respresenting the time.
  * @private
  */
-emeLogger.timeToString_ = function(time) {
+emeLogger.timeToString_ = function (time) {
   var date = new Date(time);
+  // get the time zone offset in minutes and add (subtract)
+  const localTimezoneOffset = date.getTimezoneOffset();
+  date.setMinutes((date.getMinutes() - localTimezoneOffset));
+  // date.toISOString is 2020-01-31T00:00:00.000Z for GMT
+  return date.toISOString().match(/T(.*)Z/)[1];
+  // old code
   var hours = emeLogger.padNumber_(date.getHours().toString());
   var minutes = emeLogger.padNumber_(date.getMinutes().toString());
   var seconds = emeLogger.padNumber_(date.getSeconds().toString());
   var milli = emeLogger.padNumber_(date.getMilliseconds().toString());
   return hours.concat(':', minutes, ':', seconds, ':', milli);
 };
+
+emeLogger.showHex_ = function (data) {
+  const BYTES_PER_ROW = 16;
+  const getHexRow = offset => {
+    const endSlice = offset + BYTES_PER_ROW < data.length ? offset + BYTES_PER_ROW : data.length;
+    const currentRow = [...data.slice(offset, endSlice)].map(byte => byte.toString(16).padStart(2, '0')).join(' ').concat('\t').concat([...data.slice(offset, endSlice)].map(byte => ((byte > 31 && byte < 127) || byte > 160 ) ? String.fromCharCode(byte) : '.').join(''));
+    if (endSlice === data.length) return currentRow;
+    return [currentRow].concat(getHexRow(offset + BYTES_PER_ROW)).join('\n');
+  }
+  return getHexRow(0);
+}
 
 
 /**
@@ -83,7 +102,7 @@ emeLogger.timeToString_ = function(time) {
  * @return {string} A string padded with zeros to the desired length.
  * @private
  */
-emeLogger.padNumber_ = function(num, length) {
+emeLogger.padNumber_ = function (num, length) {
   while (num.length < length) {
     num = '0' + num;
   }
@@ -98,9 +117,10 @@ emeLogger.padNumber_ = function(num, length) {
  * @param {string} keySystem The keySystem used for this Event/Call.
  * @return {string|undefined} The formatted message.
  */
-emeLogger.getFormattedMessage = function(name, data, keySystem) {
+emeLogger.getFormattedMessage = function (name, data, keySystem) {
   if (!document.emeFormatters) {
-    return;
+    // default to 'hex' view if no other formatter provided
+    return emeLogger.showHex_(new Uint8Array(data));
   }
 
   var formattedMessage = '';
@@ -142,7 +162,7 @@ emeLogger.getFormattedMessage = function(name, data, keySystem) {
  * @param {Array} args The arguments that were passed.
  * @constructor
  */
-emeLogger.PromiseResult = function(title, status, result, args) {
+emeLogger.PromiseResult = function (title, status, result, args) {
   this.timestamp = emeLogger.timeToString_(new Date().getTime());
   this.title = title;
   this.status = status;
@@ -161,7 +181,7 @@ emeLogger.PromiseResult = function(title, status, result, args) {
  * @param {Object} obj An object to format into emeLogger.LogItemData.
  * @return {!emeLogger.LogItemData} A formatted object.
  */
-emeLogger.getMessagePassableObject = function(obj) {
+emeLogger.getMessagePassableObject = function (obj) {
   var names = [];
   var values = [];
   for (var prop in obj) {
@@ -169,12 +189,12 @@ emeLogger.getMessagePassableObject = function(obj) {
     // We only care about direct properties of the object. Calling
     // hasOwnProperty will stop from checking down the object's prototype chain.
     if (obj.hasOwnProperty(prop)) {
-      if (typeof(obj[prop]) == 'function') continue;
+      if (typeof (obj[prop]) == 'function') continue;
       names.push(prop);
-      if (typeof(obj[prop]) == 'object' && obj[prop] != null) {
+      if (typeof (obj[prop]) == 'object' && obj[prop] != null) {
         // Give ArrayBuffers a view so they can be properly logged.
         var value = obj[prop].constructor.name == 'ArrayBuffer' ?
-            new Uint8Array(obj[prop]) : obj[prop];
+          new Uint8Array(obj[prop]) : obj[prop];
         values.push(emeLogger.getMessagePassableObject(value));
       } else {
         values.push(obj[prop]);
@@ -201,11 +221,11 @@ emeLogger.getMessagePassableObject = function(obj) {
  * @param {!MediaKeySystemAccess} mksa The MediaKeySystemAccess object
  * @constructor
  */
-emeLogger.MediaKeySystemAccess = function(mksa) {
+emeLogger.MediaKeySystemAccess = function (mksa) {
   this.title = 'MediaKeySystemAccess';
   this.keySystem = mksa.keySystem;
   this.configuration = mksa.listenersAdded_ ?
-      mksa.originalGetConfiguration() : mksa.getConfiguration();
+    mksa.originalGetConfiguration() : mksa.getConfiguration();
 };
 
 
@@ -214,13 +234,13 @@ emeLogger.MediaKeySystemAccess = function(mksa) {
  * @param {!MediaKeySession} mks The MediaKeySession object.
  * @constructor
  */
-emeLogger.MediaKeySession = function(mks) {
+emeLogger.MediaKeySession = function (mks) {
   this.title = 'MediaKeySession';
   this.sessionId = mks.sessionId;
   this.expiration = mks.expiration;
   this.keyStatuses = [];
-  mks.keyStatuses.forEach(function(status, keyId) {
-    this.keyStatuses.push({'keyId' : new Uint8Array(keyId), 'status' : status});
+  mks.keyStatuses.forEach(function (status, keyId) {
+    this.keyStatuses.push({ 'keyId': new Uint8Array(keyId), 'status': status });
   }.bind(this));
 };
 
@@ -230,7 +250,7 @@ emeLogger.MediaKeySession = function(mks) {
  * @param {!HTMLMediaElement} element The HTMLMediaElement.
  * @constructor
  */
-emeLogger.HTMLMediaElement = function(element) {
+emeLogger.HTMLMediaElement = function (element) {
   this.title = element.constructor.name;
   this.id = element.id;
   if (element.classList) {
@@ -246,14 +266,14 @@ emeLogger.HTMLMediaElement = function(element) {
  * @extends {emeLogger.EmeEvent}
  * @constructor
  */
-emeLogger.MessageEvent = function(e) {
+emeLogger.MessageEvent = function (e) {
   var mks = new emeLogger.MediaKeySession(e.target);
   emeLogger.EmeEvent.apply(this, ['MessageEvent', e, mks]);
   // If a formatter extension is available, message will be formatted.
   this.message = new Uint8Array(e.message);
   this.messageType = e.messageType;
   this.formattedMessage = emeLogger.getFormattedMessage(
-      'message', e.message, e.keySystem);
+    'message', e.message, e.keySystem);
 };
 emeLogger.MessageEvent.prototype = Object.create(emeLogger.EmeEvent.prototype);
 /** @constructor */
@@ -266,15 +286,15 @@ emeLogger.MessageEvent.prototype.constructor = emeLogger.MessageEvent;
  * @extends {emeLogger.EmeEvent}
  * @constructor
  */
-emeLogger.KeyStatusesChangeEvent = function(e) {
+emeLogger.KeyStatusesChangeEvent = function (e) {
   var mks = new emeLogger.MediaKeySession(e.target);
   emeLogger.EmeEvent.apply(this, ['KeyStatusesChangeEvent', e, mks]);
 };
 emeLogger.KeyStatusesChangeEvent.prototype =
-    Object.create(emeLogger.EmeEvent.prototype);
+  Object.create(emeLogger.EmeEvent.prototype);
 /** @constructor */
 emeLogger.KeyStatusesChangeEvent.prototype.constructor =
-    emeLogger.KeyStatusesChangeEvent;
+  emeLogger.KeyStatusesChangeEvent;
 
 
 /**
@@ -283,7 +303,7 @@ emeLogger.KeyStatusesChangeEvent.prototype.constructor =
  * @extends {emeLogger.EmeEvent}
  * @constructor
  */
-emeLogger.NeedKeyEvent = function(e) {
+emeLogger.NeedKeyEvent = function (e) {
   var element = new emeLogger.HTMLMediaElement(e.target);
   emeLogger.EmeEvent.apply(this, ['NeedKeyEvent', e, element]);
 };
@@ -298,15 +318,15 @@ emeLogger.NeedKeyEvent.prototype.constructor = emeLogger.NeedKeyEvent;
  * @extends {emeLogger.EmeEvent}
  * @constructor
  */
-emeLogger.KeyMessageEvent = function(e) {
+emeLogger.KeyMessageEvent = function (e) {
   var element = new emeLogger.HTMLMediaElement(e.target);
   emeLogger.EmeEvent.apply(this, ['KeyMessageEvent', e, element]);
   // If a formatter extension is available, message will be formatted.
   this.formattedMessage = emeLogger.getFormattedMessage(
-      'webkitkeymessage', e.message, e.keySystem);
+    'webkitkeymessage', e.message, e.keySystem);
 };
 emeLogger.KeyMessageEvent.prototype =
-    Object.create(emeLogger.EmeEvent.prototype);
+  Object.create(emeLogger.EmeEvent.prototype);
 /** @constructor */
 emeLogger.KeyMessageEvent.prototype.constructor = emeLogger.KeyMessageEvent;
 
@@ -317,7 +337,7 @@ emeLogger.KeyMessageEvent.prototype.constructor = emeLogger.KeyMessageEvent;
  * @extends {emeLogger.EmeEvent}
  * @constructor
  */
-emeLogger.KeyAddedEvent = function(e) {
+emeLogger.KeyAddedEvent = function (e) {
   var element = new emeLogger.HTMLMediaElement(e.target);
   emeLogger.EmeEvent.apply(this, ['KeyAddedEvent', e, element]);
 };
@@ -332,12 +352,12 @@ emeLogger.KeyAddedEvent.prototype.constructor = emeLogger.KeyAddedEvent;
  * @extends {emeLogger.EmeEvent}
  * @constructor
  */
-emeLogger.KeyErrorEvent = function(e) {
+emeLogger.KeyErrorEvent = function (e) {
   var element = new emeLogger.HTMLMediaElement(e.target);
   emeLogger.EmeEvent.apply(this, ['KeyErrorEvent', e, element]);
 };
 emeLogger.KeyErrorEvent.prototype =
-    Object.create(emeLogger.EmeEvent.prototype);
+  Object.create(emeLogger.EmeEvent.prototype);
 /** @constructor */
 emeLogger.KeyErrorEvent.prototype.constructor = emeLogger.KeyErrorEvent;
 
@@ -348,14 +368,14 @@ emeLogger.KeyErrorEvent.prototype.constructor = emeLogger.KeyErrorEvent;
  * @extends {emeLogger.EmeEvent}
  * @constructor
  */
-emeLogger.EncryptedEvent = function(e) {
+emeLogger.EncryptedEvent = function (e) {
   var element = new emeLogger.HTMLMediaElement(e.target);
   emeLogger.EmeEvent.apply(this, ['EncryptedEvent', e, element]);
-  this.initData = new Uint8Array(e.initData);
+  this.initData = emeLogger.showHex_(new Uint8Array(e.initData));
   this.initDataType = e.initDataType;
 };
 emeLogger.EncryptedEvent.prototype =
-    Object.create(emeLogger.EmeEvent.prototype);
+  Object.create(emeLogger.EmeEvent.prototype);
 /** @constructor */
 emeLogger.EncryptedEvent.prototype.constructor = emeLogger.EncryptedEvent;
 
@@ -366,7 +386,7 @@ emeLogger.EncryptedEvent.prototype.constructor = emeLogger.EncryptedEvent;
  * @extends {emeLogger.EmeEvent}
  * @constructor
  */
-emeLogger.PlayEvent = function(e) {
+emeLogger.PlayEvent = function (e) {
   var element = new emeLogger.HTMLMediaElement(e.target);
   emeLogger.EmeEvent.apply(this, ['PlayEvent', e, element]);
 };
@@ -381,7 +401,7 @@ emeLogger.PlayEvent.prototype.constructor = emeLogger.PlayEvent;
  * @extends {emeLogger.EmeEvent}
  * @constructor
  */
-emeLogger.ErrorEvent = function(e) {
+emeLogger.ErrorEvent = function (e) {
   var element = new emeLogger.HTMLMediaElement(e.target);
   emeLogger.EmeEvent.apply(this, ['ErrorEvent', e, element]);
   this.errorType = e.target.error;
@@ -402,17 +422,17 @@ emeLogger.ErrorEvent.prototype.constructor = emeLogger.ErrorEvent;
  * @extends {emeLogger.EmeMethodCall}
  * @constructor
  */
-emeLogger.RequestMediaKeySystemAccessCall = function(args, target, result) {
+emeLogger.RequestMediaKeySystemAccessCall = function (args, target, result) {
   emeLogger.EmeMethodCall.apply(
-      this, ['RequestMediaKeySystemAccessCall', target, result]);
+    this, ['RequestMediaKeySystemAccessCall', target, result]);
   this.keySystem = args[0];
   this.supportedConfigurations = args[1];
 };
 emeLogger.RequestMediaKeySystemAccessCall.prototype =
-    Object.create(emeLogger.EmeMethodCall.prototype);
+  Object.create(emeLogger.EmeMethodCall.prototype);
 /** @constructor */
 emeLogger.RequestMediaKeySystemAccessCall.prototype.constructor =
-    emeLogger.RequestMediaKeySystemAccessCall;
+  emeLogger.RequestMediaKeySystemAccessCall;
 
 
 /**
@@ -423,15 +443,15 @@ emeLogger.RequestMediaKeySystemAccessCall.prototype.constructor =
  * @extends {emeLogger.EmeMethodCall}
  * @constructor
  */
-emeLogger.GetConfigurationCall = function(args, target, result) {
+emeLogger.GetConfigurationCall = function (args, target, result) {
   var mksa = new emeLogger.MediaKeySystemAccess(target);
   emeLogger.EmeMethodCall.apply(this, ['GetConfigurationCall', mksa, result]);
 };
 emeLogger.GetConfigurationCall.prototype =
-    Object.create(emeLogger.EmeMethodCall.prototype);
+  Object.create(emeLogger.EmeMethodCall.prototype);
 /** @constructor */
 emeLogger.GetConfigurationCall.prototype.constructor =
-    emeLogger.GetConfigurationCall;
+  emeLogger.GetConfigurationCall;
 
 
 /**
@@ -442,15 +462,15 @@ emeLogger.GetConfigurationCall.prototype.constructor =
  * @extends {emeLogger.EmeMethodCall}
  * @constructor
  */
-emeLogger.CreateMediaKeysCall = function(args, target, result) {
+emeLogger.CreateMediaKeysCall = function (args, target, result) {
   var mksa = new emeLogger.MediaKeySystemAccess(target);
   emeLogger.EmeMethodCall.apply(this, ['CreateMediaKeysCall', mksa, result]);
 };
 emeLogger.CreateMediaKeysCall.prototype =
-    Object.create(emeLogger.EmeMethodCall.prototype);
+  Object.create(emeLogger.EmeMethodCall.prototype);
 /** @constructor */
 emeLogger.CreateMediaKeysCall.prototype.constructor =
-    emeLogger.CreateMediaKeysCall;
+  emeLogger.CreateMediaKeysCall;
 
 
 /**
@@ -461,14 +481,14 @@ emeLogger.CreateMediaKeysCall.prototype.constructor =
  * @extends {emeLogger.EmeMethodCall}
  * @constructor
  */
-emeLogger.CreateSessionCall = function(args, target, result) {
+emeLogger.CreateSessionCall = function (args, target, result) {
   var mks = new emeLogger.MediaKeySession(result);
   emeLogger.EmeMethodCall.apply(this, ['CreateSessionCall', target, mks]);
   // Temporary is the default session type if none is provided.
   this.sessionType = args[0] ? args[0] : 'temporary';
 };
 emeLogger.CreateSessionCall.prototype =
-    Object.create(emeLogger.EmeMethodCall.prototype);
+  Object.create(emeLogger.EmeMethodCall.prototype);
 /** @constructor */
 emeLogger.CreateSessionCall.prototype.constructor = emeLogger.CreateSessionCall;
 
@@ -481,16 +501,16 @@ emeLogger.CreateSessionCall.prototype.constructor = emeLogger.CreateSessionCall;
  * @extends {emeLogger.EmeMethodCall}
  * @constructor
  */
-emeLogger.SetServerCertificateCall = function(args, target, result) {
+emeLogger.SetServerCertificateCall = function (args, target, result) {
   emeLogger.EmeMethodCall.apply(
-      this, ['SetServerCertificateCall', target, result]);
+    this, ['SetServerCertificateCall', target, result]);
   this.serverCertificate = new Uint8Array(args[0]);
 };
 emeLogger.SetServerCertificateCall.prototype =
-    Object.create(emeLogger.EmeMethodCall.prototype);
+  Object.create(emeLogger.EmeMethodCall.prototype);
 /** @constructor */
 emeLogger.SetServerCertificateCall.prototype.constructor =
-    emeLogger.SetServerCertificateCall;
+  emeLogger.SetServerCertificateCall;
 
 
 /**
@@ -501,17 +521,17 @@ emeLogger.SetServerCertificateCall.prototype.constructor =
  * @extends {emeLogger.EmeMethodCall}
  * @constructor
  */
-emeLogger.GenerateRequestCall = function(args, target, result) {
+emeLogger.GenerateRequestCall = function (args, target, result) {
   var mks = new emeLogger.MediaKeySession(target);
   emeLogger.EmeMethodCall.apply(this, ['GenerateRequestCall', mks, result]);
   this.initDataType = args[0];
-  this.initData = new Uint8Array(args[1]);
+  this.initData = emeLogger.showHex_(new Uint8Array(args[1]));
 };
 emeLogger.GenerateRequestCall.prototype =
-    Object.create(emeLogger.EmeMethodCall.prototype);
+  Object.create(emeLogger.EmeMethodCall.prototype);
 /** @constructor */
 emeLogger.GenerateRequestCall.prototype.constructor =
-    emeLogger.GenerateRequestCall;
+  emeLogger.GenerateRequestCall;
 
 
 /**
@@ -522,7 +542,7 @@ emeLogger.GenerateRequestCall.prototype.constructor =
  * @extends {emeLogger.EmeMethodCall}
  * @constructor
  */
-emeLogger.PlayCall = function(args, target, result) {
+emeLogger.PlayCall = function (args, target, result) {
   var element = new emeLogger.HTMLMediaElement(target);
   emeLogger.EmeMethodCall.apply(this, ['PlayCall', element, result]);
 };
@@ -539,7 +559,7 @@ emeLogger.PlayCall.prototype.constructor = emeLogger.PlayCall;
  * @extends {emeLogger.EmeMethodCall}
  * @constructor
  */
-emeLogger.LoadCall = function(args, target, result) {
+emeLogger.LoadCall = function (args, target, result) {
   var mks = new emeLogger.MediaKeySession(target);
   emeLogger.EmeMethodCall.apply(this, ['LoadCall', mks, result]);
   this.sessionId = args[0];
@@ -557,16 +577,16 @@ emeLogger.LoadCall.prototype.constructor = emeLogger.LoadCall;
  * @extends {emeLogger.EmeMethodCall}
  * @constructor
  */
-emeLogger.UpdateCall = function(args, target, result) {
+emeLogger.UpdateCall = function (args, target, result) {
   var mks = new emeLogger.MediaKeySession(target);
   emeLogger.EmeMethodCall.apply(this, ['UpdateCall', mks, result]);
   this.response = new Uint8Array(args[0]);
   // If a formatter extension is available, response will be formatted.
   this.formattedMessage = emeLogger.getFormattedMessage(
-      'UpdateCall', this.response, target.keySystem_);
+    'UpdateCall', this.response, target.keySystem_);
 };
 emeLogger.UpdateCall.prototype =
-    Object.create(emeLogger.EmeMethodCall.prototype);
+  Object.create(emeLogger.EmeMethodCall.prototype);
 /** @constructor */
 emeLogger.UpdateCall.prototype.constructor = emeLogger.UpdateCall;
 
@@ -579,12 +599,12 @@ emeLogger.UpdateCall.prototype.constructor = emeLogger.UpdateCall;
  * @extends {emeLogger.EmeMethodCall}
  * @constructor
  */
-emeLogger.CloseCall = function(args, target, result) {
+emeLogger.CloseCall = function (args, target, result) {
   var mks = new emeLogger.MediaKeySession(target);
   emeLogger.EmeMethodCall.apply(this, ['CloseCall', mks, result]);
 };
 emeLogger.CloseCall.prototype =
-    Object.create(emeLogger.EmeMethodCall.prototype);
+  Object.create(emeLogger.EmeMethodCall.prototype);
 /** @constructor */
 emeLogger.CloseCall.prototype.constructor = emeLogger.CloseCall;
 
@@ -597,12 +617,12 @@ emeLogger.CloseCall.prototype.constructor = emeLogger.CloseCall;
  * @extends {emeLogger.EmeMethodCall}
  * @constructor
  */
-emeLogger.RemoveCall = function(args, target, result) {
+emeLogger.RemoveCall = function (args, target, result) {
   var mks = new emeLogger.MediaKeySession(target);
   emeLogger.EmeMethodCall.apply(this, ['RemoveCall', mks, result]);
 };
 emeLogger.RemoveCall.prototype =
-    Object.create(emeLogger.EmeMethodCall.prototype);
+  Object.create(emeLogger.EmeMethodCall.prototype);
 /** @constructor */
 emeLogger.RemoveCall.prototype.constructor = emeLogger.RemoveCall;
 
@@ -615,14 +635,14 @@ emeLogger.RemoveCall.prototype.constructor = emeLogger.RemoveCall;
  * @extends {emeLogger.EmeMethodCall}
  * @constructor
  */
-emeLogger.CanPlayTypeCall = function(args, target, result) {
+emeLogger.CanPlayTypeCall = function (args, target, result) {
   var element = new emeLogger.HTMLMediaElement(target);
   emeLogger.EmeMethodCall.apply(this, ['CanPlayTypeCall', element, result]);
   this.type = args[0];
   this.keySystem = args[1];
 };
 emeLogger.CanPlayTypeCall.prototype =
-    Object.create(emeLogger.EmeMethodCall.prototype);
+  Object.create(emeLogger.EmeMethodCall.prototype);
 /** @constructor */
 emeLogger.CanPlayTypeCall.prototype.constructor = emeLogger.CanPlayTypeCall;
 
@@ -635,18 +655,18 @@ emeLogger.CanPlayTypeCall.prototype.constructor = emeLogger.CanPlayTypeCall;
  * @extends {emeLogger.EmeMethodCall}
  * @constructor
  */
-emeLogger.GenerateKeyRequestCall = function(args, target, result) {
+emeLogger.GenerateKeyRequestCall = function (args, target, result) {
   var element = new emeLogger.HTMLMediaElement(target);
   emeLogger.EmeMethodCall.apply(
-      this, ['GenerateKeyRequestCall', element, result]);
+    this, ['GenerateKeyRequestCall', element, result]);
   this.keySystem = args[0];
-  this.initData = args[1];
+  this.initData = emeLogger.showHex_(args[1]);
 };
 emeLogger.GenerateKeyRequestCall.prototype =
-    Object.create(emeLogger.EmeMethodCall.prototype);
+  Object.create(emeLogger.EmeMethodCall.prototype);
 /** @constructor */
 emeLogger.GenerateKeyRequestCall.prototype.constructor =
-    emeLogger.GenerateKeyRequestCall;
+  emeLogger.GenerateKeyRequestCall;
 
 
 /**
@@ -657,19 +677,19 @@ emeLogger.GenerateKeyRequestCall.prototype.constructor =
  * @extends {emeLogger.EmeMethodCall}
  * @constructor
  */
-emeLogger.AddKeyCall = function(args, target, result) {
+emeLogger.AddKeyCall = function (args, target, result) {
   var element = new emeLogger.HTMLMediaElement(target);
   emeLogger.EmeMethodCall.apply(this, ['AddKeyCall', element, result]);
   this.keySystem = args[0];
   this.key = args[1];
-  this.initData = args[2];
+  this.initData = emeLogger.showHex_(args[2]);
   this.sessionId = args[3];
   // If a formatter extension is available, key will be formatted.
   this.formattedMessage = emeLogger.getFormattedMessage(
-      'AddKeyCall', this.key, this.keySystem);
+    'AddKeyCall', this.key, this.keySystem);
 };
 emeLogger.AddKeyCall.prototype =
-    Object.create(emeLogger.EmeMethodCall.prototype);
+  Object.create(emeLogger.EmeMethodCall.prototype);
 /** @constructor */
 emeLogger.AddKeyCall.prototype.constructor = emeLogger.AddKeyCall;
 
@@ -682,18 +702,18 @@ emeLogger.AddKeyCall.prototype.constructor = emeLogger.AddKeyCall;
  * @extends {emeLogger.EmeMethodCall}
  * @constructor
  */
-emeLogger.CancelKeyRequestCall = function(args, target, result) {
+emeLogger.CancelKeyRequestCall = function (args, target, result) {
   var element = new emeLogger.HTMLMediaElement(target);
   emeLogger.EmeMethodCall.apply(
-      this, ['CancelKeyRequestCall', element, result]);
+    this, ['CancelKeyRequestCall', element, result]);
   this.keySystem = args[0];
   this.sessionId = args[1];
 };
 emeLogger.CancelKeyRequestCall.prototype =
-    Object.create(emeLogger.EmeMethodCall.prototype);
+  Object.create(emeLogger.EmeMethodCall.prototype);
 /** @constructor */
 emeLogger.CancelKeyRequestCall.prototype.constructor =
-    emeLogger.CancelKeyRequestCall;
+  emeLogger.CancelKeyRequestCall;
 
 
 /**
@@ -704,13 +724,13 @@ emeLogger.CancelKeyRequestCall.prototype.constructor =
  * @extends {emeLogger.EmeMethodCall}
  * @constructor
  */
-emeLogger.SetMediaKeysCall = function(args, target, result) {
+emeLogger.SetMediaKeysCall = function (args, target, result) {
   var element = new emeLogger.HTMLMediaElement(target);
   emeLogger.EmeMethodCall.apply(this, ['SetMediaKeysCall', element, result]);
   this.mediaKeys = args[0];
 };
 emeLogger.SetMediaKeysCall.prototype =
-    Object.create(emeLogger.EmeMethodCall.prototype);
+  Object.create(emeLogger.EmeMethodCall.prototype);
 /** @constructor */
 emeLogger.SetMediaKeysCall.prototype.constructor = emeLogger.SetMediaKeysCall;
 
